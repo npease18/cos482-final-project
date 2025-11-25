@@ -30,240 +30,117 @@ class RedditScraper:
         self.session.headers.update(self.headers)
     
     def get_subreddit_posts(self, subreddit: str, sort_by: str = "hot", limit: int = 25) -> List[Dict]:
-        """
-        Get posts from a specific subreddit
-        
-        Args:
-            subreddit: Subreddit name (without r/)
-            sort_by: Sort method (hot, new, top, rising)
-            limit: Number of posts to fetch (max 100)
-        
-        Returns:
-            List of post dictionaries
-        """
+        """Get posts from a specific subreddit"""
         url = f"{self.base_url}/r/{subreddit}/{sort_by}.json"
         params = {'limit': limit}
         
+        logger.info(f"Fetching posts from r/{subreddit} sorted by {sort_by}")
+        children = self._fetch_reddit_data(url, params)
+        
+        posts = []
+        for item in children:
+            post = item['data']
+            if not self._should_skip_post(post):
+                posts.append(self._extract_post_info(post))
+        
+        logger.info(f"Successfully fetched {len(posts)} posts from r/{subreddit}")
+        return posts
+    
+    def _should_skip_post(self, post: Dict) -> bool:
+        """Check if a post should be skipped based on all filtering criteria"""
+        return (post.get('over_18', False) or 
+                post.get('stickied', False) or 
+                self._is_rules_post(post) or 
+                self._is_media_only_post(post))
+    
+    def _extract_post_info(self, post: Dict, category: str = None) -> Dict:
+        """Extract relevant information from a Reddit post"""
+        info = {
+            'id': post.get('id'),
+            'title': post.get('title'),
+            'subreddit': post.get('subreddit'),
+            'selftext': post.get('selftext', ''),
+            'permalink': f"https://www.reddit.com{post.get('permalink')}",
+            'upvotes': round(post.get('score', 0) / post.get('upvote_ratio', 0), 0),
+            'downvotes': round(round(post.get('score', 0) / post.get('upvote_ratio', 0), 0) - post.get('score', 0), 0),
+            'score': post.get('score', 0),
+            'upvote_ratio': post.get('upvote_ratio', 0),
+            'num_comments': post.get('num_comments', 0),
+            'created_datetime': datetime.fromtimestamp(post.get('created_utc', 0)).isoformat(),
+            'flair_text': post.get('link_flair_text', ''),
+        }
+        if category:
+            info['category'] = category
+        return info
+    
+    def _fetch_reddit_data(self, url: str, params: Dict) -> List[Dict]:
+        """Unified method to fetch and parse Reddit JSON data"""
         try:
-            logger.info(f"Fetching posts from r/{subreddit} sorted by {sort_by}")
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
-            
-            data = response.json()
-            posts = []
-            
-            for item in data['data']['children']:
-                post = item['data']
-                
-                # Skip NSFW content
-                if post.get('over_18', False):
-                    continue
-                
-                # Skip stickied posts (often rules, announcements, etc.)
-                if post.get('stickied', False):
-                    continue
-                
-                # Skip rules posts based on title patterns
-                if self._is_rules_post(post):
-                    continue
-                
-                # Skip video or photo-only posts
-                if self._is_media_only_post(post):
-                    continue
-                
-                # Extract relevant information
-                post_info = {
-                    'id': post.get('id'),
-                    'title': post.get('title'),
-                    'subreddit': post.get('subreddit'),
-                    'selftext': post.get('selftext', ''),
-                    'permalink': f"https://www.reddit.com{post.get('permalink')}",
-                    'upvotes': post.get('ups', 0),
-                    'downvotes': post.get('downs', 0),
-                    'score': post.get('score', 0),
-                    'upvote_ratio': post.get('upvote_ratio', 0),
-                    'num_comments': post.get('num_comments', 0),
-                    'created_datetime': datetime.fromtimestamp(post.get('created_utc', 0)).isoformat(),
-                    'flair_text': post.get('link_flair_text', ''),
-                }
-                posts.append(post_info)
-            
-            logger.info(f"Successfully fetched {len(posts)} posts from r/{subreddit}")
-            return posts
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching posts from r/{subreddit}: {e}")
+            return response.json()['data']['children']
+        except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+            logger.error(f"Error fetching data from {url}: {e}")
             return []
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing JSON response from r/{subreddit}: {e}")
-            return []
-    
+
     def get_popular_posts(self, sort_by: str = "hot", limit: int = 25) -> List[Dict]:
-        """
-        Get posts from r/popular
-        
-        Args:
-            sort_by: Sort method (hot, new, top, rising)
-            limit: Number of posts to fetch
-        
-        Returns:
-            List of post dictionaries
-        """
+        """Get posts from r/popular"""
         url = f"{self.base_url}/r/popular/{sort_by}.json"
         params = {'limit': limit}
         
-        try:
-            logger.info(f"Fetching popular posts sorted by {sort_by}")
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            posts = []
-            
-            for item in data['data']['children']:
-                post = item['data']
-                
-                # Skip NSFW content
-                if post.get('over_18', False):
-                    continue
-                
-                # Skip stickied posts (often rules, announcements, etc.)
-                if post.get('stickied', False):
-                    continue
-                
-                # Skip rules posts based on title patterns
-                if self._is_rules_post(post):
-                    continue
-                
-                # Skip video or photo-only posts
-                if self._is_media_only_post(post):
-                    continue
-                
-                post_info = {
-                    'id': post.get('id'),
-                    'title': post.get('title'),
-                    'subreddit': post.get('subreddit'),
-                    'selftext': post.get('selftext', ''),
-                    'permalink': f"https://www.reddit.com{post.get('permalink')}",
-                    'upvotes': post.get('ups', 0),
-                    'downvotes': post.get('downs', 0),
-                    'score': post.get('score', 0),
-                    'upvote_ratio': post.get('upvote_ratio', 0),
-                    'num_comments': post.get('num_comments', 0),
-                    'created_datetime': datetime.fromtimestamp(post.get('created_utc', 0)).isoformat(),
-                    'flair_text': post.get('link_flair_text', ''),
-                }
-                posts.append(post_info)
-            
-            logger.info(f"Successfully fetched {len(posts)} popular posts")
-            return posts
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching popular posts: {e}")
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing JSON response for popular posts: {e}")
-            return []
+        logger.info(f"Fetching popular posts sorted by {sort_by}")
+        children = self._fetch_reddit_data(url, params)
+        
+        posts = []
+        for item in children:
+            post = item['data']
+            if not self._should_skip_post(post):
+                posts.append(self._extract_post_info(post, 'popular'))
+        
+        logger.info(f"Successfully fetched {len(posts)} popular posts")
+        return posts
     
     def get_dynamic_trending_subreddits(self, limit: int = 20) -> List[str]:
-        """
-        Dynamically discover trending subreddits by analyzing r/popular posts
-        
-        Args:
-            limit: Maximum number of trending subreddits to return
-        
-        Returns:
-            List of trending subreddit names (PG-filtered)
-        """
+        """Dynamically discover trending subreddits from popular posts"""
         try:
             logger.info("Discovering trending subreddits from popular posts...")
-            
-            # Fetch a large number of popular posts to analyze subreddit distribution
             url = f"{self.base_url}/r/popular/hot.json"
-            params = {'limit': 100}  # Get more posts for better analysis
+            children = self._fetch_reddit_data(url, {'limit': limit})
             
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Count subreddit occurrences
             subreddit_counts = {}
-            
-            for item in data['data']['children']:
+            for item in children:
                 post = item['data']
-                
-                # Skip NSFW content
-                if post.get('over_18', False):
-                    continue
-                    
-                subreddit = post.get('subreddit')
-                if subreddit:
-                    # Filter out known problematic subreddits even if not marked NSFW
-                    if self._is_family_friendly_subreddit(subreddit):
+                if not post.get('over_18', False):
+                    subreddit = post.get('subreddit')
+                    if subreddit and self._is_family_friendly_subreddit(subreddit):
                         subreddit_counts[subreddit] = subreddit_counts.get(subreddit, 0) + 1
             
-            # Sort by popularity and return top subreddits
-            trending_subreddits = sorted(
-                subreddit_counts.keys(), 
-                key=lambda x: subreddit_counts[x], 
-                reverse=True
-            )[:limit]
+            trending = sorted(subreddit_counts.keys(), key=lambda x: subreddit_counts[x], reverse=True)[:limit]
+            logger.info(f"Discovered {len(trending)} trending subreddits: {trending[:10]}")
             
-            logger.info(f"Discovered {len(trending_subreddits)} trending subreddits: {trending_subreddits[:10]}")
-            
-            # If we don't have enough, supplement with static list
-            if len(trending_subreddits) < 10:
+            # Supplement with static list if needed
+            if len(trending) < 10:
                 logger.info("Supplementing with static subreddit list...")
-                static_subreddits = self.get_static_subreddits()
-                for subreddit in static_subreddits:
-                    if subreddit not in trending_subreddits:
-                        trending_subreddits.append(subreddit)
-                        if len(trending_subreddits) >= limit:
-                            break
+                static = self.get_static_subreddits()
+                trending.extend([s for s in static if s not in trending])
+                trending = trending[:limit]
             
-            return trending_subreddits
-            
+            return trending
         except Exception as e:
             logger.error(f"Error discovering trending subreddits: {e}")
-            logger.info("Falling back to static subreddit list...")
             return self.get_static_subreddits()[:limit]
     
     def _is_family_friendly_subreddit(self, subreddit: str) -> bool:
-        """
-        Check if a subreddit is family-friendly based on name patterns
-        
-        Args:
-            subreddit: Subreddit name to check
-            
-        Returns:
-            True if subreddit appears to be family-friendly
-        """
-        # Convert to lowercase for checking
+        """Check if a subreddit is family-friendly based on name patterns"""
         sub_lower = subreddit.lower()
         
-        # Known problematic keywords/patterns to avoid
-        nsfw_keywords = [
-            'nsfw', 'porn', 'sex', 'nude', 'naked', 'xxx', 'gonewild', 
-            'boobs', 'ass', 'dick', 'cock', 'pussy', 'fetish', 'bdsm',
-            'lesbian', 'gay', 'anal', 'milf', 'teen', 'amateur',
-            'cumshot', 'blowjob', 'threesome', 'orgy', 'strip',
-            'onlyfans', 'camgirl', 'escort', 'hookup', 'tinder',
-            'slutty', 'kinky', 'dirty', 'erotic', 'adult'
-        ]
+        # Known problematic keywords to avoid
+        nsfw_keywords = ['nsfw', 'porn', 'sex', 'nude', 'xxx', 'gonewild', 'hookup', 
+                        'fetish', 'bdsm', 'escort', 'kinky', 'dirty', 'erotic', 'adult']
         
-        # Check for problematic keywords
-        for keyword in nsfw_keywords:
-            if keyword in sub_lower:
-                return False
-        
-        # Additional patterns that might indicate NSFW content
-        if sub_lower.endswith('porn') or sub_lower.endswith('nsfw'):
-            return False
-            
-        if 'r4r' in sub_lower or 'hookup' in sub_lower:
-            return False
-        
-        return True
+        # Check for problematic keywords and patterns
+        return not any(keyword in sub_lower for keyword in nsfw_keywords) and \
+               not (sub_lower.endswith('porn') or sub_lower.endswith('nsfw') or 'r4r' in sub_lower)
     
     def _is_rules_post(self, post: Dict) -> bool:
         """
@@ -315,75 +192,34 @@ class RedditScraper:
         return False
     
     def _is_media_only_post(self, post: Dict) -> bool:
-        """
-        Check if a post is video or photo-only with minimal text content
-        
-        Args:
-            post: Reddit post data dictionary
-            
-        Returns:
-            True if post appears to be media-only without meaningful text discussion
-        """
+        """Check if a post is video or photo-only with minimal text content"""
         title = post.get('title', '').strip()
         selftext = post.get('selftext', '').strip()
         url = post.get('url', '')
         domain = post.get('domain', '').lower()
-        is_video = post.get('is_video', False)
-        is_self = post.get('is_self', False)
         
-        # Skip direct video posts
-        if is_video:
+        # Direct video posts
+        if post.get('is_video', False):
             return True
         
-        # Skip posts that are just links to images/videos with no text content
-        if not is_self and not selftext:
-            # Common image/video hosting domains
-            media_domains = [
-                'i.redd.it', 'v.redd.it', 'reddit.com/gallery',
-                'imgur.com', 'i.imgur.com', 'gfycat.com', 
-                'youtube.com', 'youtu.be', 'twitch.tv',
-                'instagram.com', 'tiktok.com', 'twitter.com',
-                'streamable.com', 'giphy.com', 'tenor.com'
-            ]
-            
-            for media_domain in media_domains:
-                if media_domain in domain or media_domain in url:
-                    return True
+        # Posts with substantial text content are allowed
+        if len(selftext) >= 100:
+            return False
         
-        # Check for image file extensions in URL
-        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
-        video_extensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v']
+        # Check for media domains and file extensions
+        media_patterns = ['i.redd.it', 'v.redd.it', 'imgur.com', 'youtube.com', 'youtu.be',
+                         '.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webm']
+        if any(pattern in url.lower() or pattern in domain for pattern in media_patterns):
+            return True
         
-        url_lower = url.lower()
-        for ext in image_extensions + video_extensions:
-            if url_lower.endswith(ext):
-                return True
-        
-        # Skip posts with very short titles that are likely just media descriptions
-        # But allow if there's substantial selftext content
+        # Very short titles without content
         if len(title) < 10 and len(selftext) < 50:
             return True
         
-        # Skip posts that are just single word titles or emoji-only
-        if len(title.split()) <= 2 and not selftext:
+        # Common media post patterns
+        media_phrases = ['check out this', 'look at this', 'mfw', 'mrw', 'me irl']
+        if any(phrase in title.lower() for phrase in media_phrases) and len(selftext) < 50:
             return True
-        
-        # Allow posts with substantial text content even if they have media
-        if len(selftext) >= 100:  # Substantial text content
-            return False
-        
-        # Check for common photo/video post patterns in titles
-        media_title_patterns = [
-            'check out this', 'look at this', 'found this', 'saw this',
-            'my reaction when', 'mfw', 'mrw', 'me irl', 'meirl',
-            'this is', 'here is', 'heres', 'behold',
-            'feast your eyes', 'take a look'
-        ]
-        
-        title_lower = title.lower()
-        for pattern in media_title_patterns:
-            if pattern in title_lower and len(selftext) < 50:
-                return True
         
         return False
     
@@ -440,12 +276,9 @@ class RedditScraper:
         all_data = {}
         
         # Get popular posts
-        logger.info("Fetching popular posts...")
-        popular_posts = self.get_popular_posts(limit=posts_per_subreddit)
-        all_data['popular'] = popular_posts
         
         # Get posts from dynamically discovered trending subreddits
-        trending_subreddits = self.get_dynamic_trending_subreddits(limit=50)
+        trending_subreddits = self.get_dynamic_trending_subreddits(limit=100)
         
         for subreddit in trending_subreddits:
             time.sleep(1)  # Rate limiting - be respectful to Reddit's servers
