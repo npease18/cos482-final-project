@@ -100,7 +100,7 @@ class RedditScraper:
         logger.info(f"Successfully fetched {len(posts)} popular posts")
         return posts
     
-    def get_dynamic_trending_subreddits(self, limit: int = 20) -> List[str]:
+    def get_dynamic_trending_subreddits(self, limit: int = 5000) -> List[str]:
         """Dynamically discover trending subreddits from popular posts"""
         try:
             logger.info("Discovering trending subreddits from popular posts...")
@@ -278,7 +278,7 @@ class RedditScraper:
         # Get popular posts
         
         # Get posts from dynamically discovered trending subreddits
-        trending_subreddits = self.get_dynamic_trending_subreddits(limit=100)
+        trending_subreddits = self.get_dynamic_trending_subreddits(limit=5000)
         
         for subreddit in trending_subreddits:
             time.sleep(1)  # Rate limiting - be respectful to Reddit's servers
@@ -354,7 +354,7 @@ def main():
     # Scrape data from all categories
     print("Starting to scrape Reddit data...")
     print("First discovering trending subreddits from popular posts...")
-    all_data = scraper.scrape_all_categories(posts_per_subreddit=100)
+    all_data = scraper.scrape_all_categories(posts_per_subreddit=10000)
     
     # Print summary
     total_posts = sum(len(posts) for posts in all_data.values())
